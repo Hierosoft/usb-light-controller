@@ -5,6 +5,11 @@ const int BLUE_PIN = 11;  // PWM pin for RGB blue
 const int BUTTON_PIN = 2; // Button signal pin
 const int BUZZER_PIN = 8; // Piezo buzzer I/O pin
 
+// LED maximum level for calibration (default halves brightness)
+// For ledMaxLevel = 128, the maximum average voltage is approximately 2.51V (5V * 128 / 255)
+// For ledMaxLevel = 255, the maximum average voltage would be 5V
+const byte ledMaxLevel = 128;
+
 // LED mode states
 int ledMode = 0; // 0: last color, 1: white, 2: off
 byte lastRed = 255;   // Default last color: red
@@ -35,10 +40,8 @@ void setup() {
   // Start serial communication
   Serial.begin(9600);
 
-  // Set initial LED state to last color (red)
-  analogWrite(RED_PIN, lastRed);
-  analogWrite(GREEN_PIN, lastGreen);
-  analogWrite(BLUE_PIN, lastBlue);
+  // Set initial LED state to last color (red), scaled by ledMaxLevel
+  updateLED();
 
   // Initialize error level
   errorLevel = 0;
@@ -154,13 +157,16 @@ void processPacket(String packet) {
 
 void updateLED() {
   if (ledMode == 0) { // Last color
-    analogWrite(RED_PIN, lastRed);
-    analogWrite(GREEN_PIN, lastGreen);
-    analogWrite(BLUE_PIN, lastBlue);
+    // Scale the color values to the maximum level
+    // The actual value written to analogWrite() will be between 0 and ledMaxLevel
+    // Corresponding to an average voltage of 0V to (ledMaxLevel / 255)*5V
+    analogWrite(RED_PIN, (static_cast<unsigned int>(lastRed) * ledMaxLevel) / 255);
+    analogWrite(GREEN_PIN, (static_cast<unsigned int>(lastGreen) * ledMaxLevel) / 255);
+    analogWrite(BLUE_PIN, (static_cast<unsigned int>(lastBlue) * ledMaxLevel) / 255);
   } else if (ledMode == 1) { // White
-    analogWrite(RED_PIN, 255);
-    analogWrite(GREEN_PIN, 255);
-    analogWrite(BLUE_PIN, 255);
+    analogWrite(RED_PIN, ledMaxLevel);
+    analogWrite(GREEN_PIN, ledMaxLevel);
+    analogWrite(BLUE_PIN, ledMaxLevel);
   } else { // Off
     analogWrite(RED_PIN, 0);
     analogWrite(GREEN_PIN, 0);
