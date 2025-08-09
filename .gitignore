@@ -9,3 +9,5 @@ doc/
 debug.txt
 .ycm_extra_conf.pyc
 .ropeproject
+/projects/usb-light-controller/usb-light-controller-backups/
+/projects/usb-light-controller/fp-info-cache
