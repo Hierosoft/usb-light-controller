@@ -142,7 +142,28 @@ I made the example more reliable and show the set feature but I need the numbers
     color = 0x000500
     packet = ":{protocol}{size}{opcode}{cvNumber}{color};\n"
 
+# usb-light-controller.ino
+Ok, lets call the Python demo ulightcontroller-set.py. It works but if we read the color with a modified copy we can call ulightcontroller-get.py:
+```
 
+    # Send READ packet to query RGB values (CV 0003)
+    protocol = 0x4801  # Hierosoft protocol 1
+    size = 0x0008      # Payload size (8 characters: 00010003)
+    opcode = 0x0001    # WRITE operation
+    cvNumber = 0x0003  # CV for light color
+    packet = \
+        f":{protocol:04X}{size:04X}{opcode:04X}{cvNumber:04X};\n"
+```
+The arduino code sets the color to red and returns :4801000E01010003FF0000; instead of the color set by ulightcontroller-set.py. To be clear, the message sent by set is parsed correctly, and I can see the RGB light turn dim green. However, it turns back to red when the get script runs.
+
+
+Play the note
+```
+#define NOTE_FS3 185
+```
+for 1 second when there is an error, and send an error message over serial. Make a sendError function each time. It should use the packet format, with ":4801" with the payload set to the length of the message plus 4 for the opcode (encoded as hex and padded to 4 hex digits), then the ERROR_ANNOUNCE opcode 0x10FF, then the message, then ";\n"
+
+Make READY_ANNOUNCE 0x3000 and ERROR_ANNOUNCE 0x2FFF and rename it to ERROR_NACK
 
 # ulightcontroller-gui.py
 - 2025-08-05

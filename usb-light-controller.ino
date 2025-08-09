@@ -14,7 +14,13 @@ const int BUTTON_PIN = 2; // Button signal pin, labeled 2
 const int BUZZER_PIN = 8; // Piezo buzzer I/O pin, labeled 8
 
 // Opcode definitions
-const uint16_t READY_ANNOUNCE = 0x1000; // Opcode for ready announcement packet
+const uint16_t READY_ANNOUNCE = 0x3000; // Ready announcement packet
+const uint16_t READ = 0x0001;           // Read operation
+const uint16_t WRITE = 0x0002;          // Write operation
+const uint16_t READ_RESPONSE_GOOD = 0x0101; // Read response success
+const uint16_t WRITE_RESPONSE_GOOD = 0x0102; // Write response success
+const uint16_t ERROR_ANNOUNCE = 0x3FFF; // General error announcement
+const uint16_t ERROR_NACK = 0x2FFF;    // not acknowledged, as in errors stemming from requests
 
 // LED maximum level for calibration (default halves brightness)
 // For ledMaxLevel = 128, the maximum average voltage is approximately 2.51V (5V * 128 / 255)
@@ -67,10 +73,21 @@ void setup() {
   Serial.flush();
 }
 
+void sendNACK(String message) {
+  // Calculate payload size: message length + 4 (for 2FFF opcode)
+  uint16_t payloadSize = message.length() + 4;
+  char response[64];
+  snprintf(response, sizeof(response), ":4801%04X%04X%s;\n",
+           payloadSize, ERROR_NACK, message.c_str());
+  Serial.print(response);
+  Serial.flush(); // Ensure error message is sent
+  tone(BUZZER_PIN, NOTE_FS3, 1000); // Play NOTE_FS3 for 1 second
+}
+
 void loop() {
   // Send ready packet every 300ms until contact is established
   if (!contactEstablished && millis() - lastReadyTime >= 300) {
-    Serial.print(":480100041000;\n"); // Send READY_ANNOUNCE packet
+    Serial.print(":480100043000;\n"); // Send READY_ANNOUNCE packet
     Serial.flush(); // Ensure output is sent
     lastReadyTime = millis();
   }
@@ -84,18 +101,20 @@ void loop() {
     if (c == ':') {
       packet = "";
     } else if (c == ';') {
-      // Expect newline after semicolon
       if (Serial.available() && Serial.read() == '\n') {
         // Serial.print("Processing packet: "); // Debug: uncomment to see packet
-        // Serial.println(packet);
+        // Serial.print(packet);
+        // Serial.print(" ledMode: "); // Debug
+        // Serial.println(ledMode);
         if (packet.length() > 0) {
           processPacket(packet);
           packet = "";
         }
       } else {
-        packet = "";
-        errorLevel = 1; // Invalid packet format (missing newline)
+        // errorLevel = 1; // Invalid packet format (missing newline)
         // Serial.println("Error: Missing newline"); // Debug
+        packet = "";
+        sendNACK("Missing newline");
       }
     } else {
       packet += c;
@@ -113,6 +132,8 @@ void loop() {
     }
     updateLED();
     delay(50); // Simple debounce
+    // Serial.print("Button pressed, ledMode: "); // Debug
+    // Serial.println(ledMode);
   }
   lastButtonState = buttonState;
 
@@ -144,23 +165,27 @@ void loop() {
 void processPacket(String packet) {
   // Check minimum length (protocol + payload size + minimum payload)
   if (packet.length() < 8) {
+    sendNACK("Packet too short");
     errorLevel = 3;
     return;
   }
 
-  // Verify protocol
+  // Verify protocol (4 hex digits)
   if (packet.substring(0, 4) != "4801") {
+    sendNACK("Invalid protocol");
     errorLevel = 1;
     return;
   }
 
-  // Get payload size
+  // Get payload size (4 hex digits)
   uint16_t payloadSize = strtol(packet.substring(4, 8).c_str(), NULL, 16);
   int dataLength = packet.length() - 8;
   if (dataLength < payloadSize) {
+    sendNACK("Payload too short");
     errorLevel = 3;
     return;
   } else if (dataLength > payloadSize) {
+    sendNACK("Payload too long");
     errorLevel = 4;
     return;
   }
@@ -171,41 +196,65 @@ void processPacket(String packet) {
   uint16_t cvNumber = strtol(payload.substring(4, 8).c_str(), NULL, 16);
 
   // Process operations
-  if (operation == 0x0001) { // READ
+  if (operation == READ) { // READ (0x0001)
     if (payloadSize != 8) {
+      sendNACK("Invalid READ payload size");
       errorLevel = 3;
       return;
     }
     if (cvNumber == 0x0003) { // Light color
-      // Send READ_RESPONSE_GOOD
+      // Send READ_RESPONSE_GOOD (4 hex digits for opcode and cvNumber, 6 hex digits for color)
       char response[32];
-      snprintf(response, sizeof(response), ":4801000E01010003%02X%02X%02X;\n",
-               lastRed, lastGreen, lastBlue);
+      snprintf(response, sizeof(response), ":4801000E%04X%04X%02X%02X%02X;\n",
+               READ_RESPONSE_GOOD, cvNumber, lastRed, lastGreen, lastBlue);
       Serial.print(response);
       Serial.flush(); // Ensure response is sent
+      if (ledMode == 0) {
+        updateLED(); // Ensure LED reflects current color
+      }
+      // Serial.print("READ: R="); // Debug
+      // Serial.print(lastRed, HEX);
+      // Serial.print(" G=");
+      // Serial.print(lastGreen, HEX);
+      // Serial.print(" B=");
+      // Serial.println(lastBlue, HEX);
     } else {
-      errorLevel = 2; // Unknown CV
+      sendNACK("Unknown CV");
+      errorLevel = 2;
     }
-  } else if (operation == 0x0002) { // WRITE
+  } else if (operation == WRITE) { // WRITE (0x0002)
     if (payloadSize != 14) {
+      sendNACK("Invalid WRITE payload size");
       errorLevel = 3;
       return;
     }
     if (cvNumber == 0x0003) { // Light color
+      // Expect 6 hex digits for color (RRGGBB)
       lastRed = strtol(payload.substring(8, 10).c_str(), NULL, 16);
       lastGreen = strtol(payload.substring(10, 12).c_str(), NULL, 16);
       lastBlue = strtol(payload.substring(12, 14).c_str(), NULL, 16);
       if (ledMode == 0) {
         updateLED();
       }
-      // Send WRITE_RESPONSE_GOOD
-      Serial.print(":4801000801020003;\n");
+      // Send WRITE_RESPONSE_GOOD (4 hex digits for opcode and cvNumber)
+      char response[32];
+      snprintf(response, sizeof(response), ":48010008%04X%04X;\n",
+               WRITE_RESPONSE_GOOD, cvNumber);
+      Serial.print(response);
       Serial.flush(); // Ensure response is sent
+      // Serial.print("WRITE: R="); // Debug
+      // Serial.print(lastRed, HEX);
+      // Serial.print(" G=");
+      // Serial.print(lastGreen, HEX);
+      // Serial.print(" B=");
+      // Serial.println(lastBlue, HEX);
     } else {
-      errorLevel = 2; // Unknown CV
+      sendNACK("Unknown CV");
+      errorLevel = 2;
     }
   } else {
-    errorLevel = 2; // Unknown operation
+    sendNACK("Unknown operation");
+    errorLevel = 2;
   }
 }
 

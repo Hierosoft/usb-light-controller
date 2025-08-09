@@ -32,12 +32,12 @@ try:
 
     # Read response
     response = False
-    while not response:
+    while True:
         response = ser.readline().decode().strip()
         if response:
             print(f"Received: {response}")
         else:
-            print("Waiting for response from Arduino")
+            print("Waiting for response from Arduino (Ctrl+C to stop)")
     print("OK")
 
 except serial.SerialException as e:
